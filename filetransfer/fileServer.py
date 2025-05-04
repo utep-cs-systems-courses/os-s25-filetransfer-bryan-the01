@@ -1,0 +1,87 @@
+#!/usr/bin/env python3
+import socket, sys, os, time
+import mytar
+sys.path.append("../lib")
+import params
+
+# Argument parsing
+switchesVarDefaults = (
+    (('-l', '--listenPort'), 'listenPort', 50001),
+    (('-?', '--usage'), "usage", False),
+)
+paramMap = params.parseParams(switchesVarDefaults)
+
+if paramMap['usage']:
+    params.usage()
+
+listenPort = paramMap['listenPort']
+listenAddr = ''  # Bind to all interfaces
+
+# Setup listener socket
+listenSock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+listenSock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+listenSock.bind((listenAddr, listenPort))
+listenSock.listen(5)
+
+print(f"[SERVER] Listening on port {listenPort}")
+
+# --- Forked client handler ---
+def handle_client(sock):
+    try:
+        # Read one line (command)
+        line = b""
+        while not line.endswith(b"\n"):
+            chunk = sock.recv(1)
+            if not chunk:
+                print("[SERVER] Client disconnected before sending command")
+                return
+            line += chunk
+
+        command = line.decode().strip()
+        if command != "PUT":
+            sock.sendall(b"ERROR: Unknown command\n")
+            print(f"[SERVER] Invalid command received: {command}")
+            return
+
+        print("[SERVER] Starting dearchive")
+        mytar.dearchive(sock)
+        print("[SERVER] File(s) received and extracted")
+        sock.sendall(b"OK\n")
+
+    except Exception as e:
+        print(f"[SERVER] Error handling client: {e}")
+
+    finally:
+        sock.close()
+        print("[SERVER] Client connection closed")
+
+
+# --- Main server loop ---
+while True:
+    try:
+        conn, addr = listenSock.accept()
+        print(f"[SERVER] New connection from {addr}")
+
+        pid = os.fork()
+        if pid == 0:
+            # Child process
+            listenSock.close()  # Child doesn't need to accept
+            handle_client(conn)
+            os._exit(0)
+        else:
+            # Parent process
+            conn.close()  # Parent doesn't handle this socket
+
+            # Reap finished children (non-blocking)
+            while True:
+                try:
+                    pid_done, _ = os.waitpid(-1, os.WNOHANG)
+                    if pid_done == 0:
+                        break
+                except ChildProcessError:
+                    break
+
+    except KeyboardInterrupt:
+        print("[SERVER] Shutting down...")
+        listenSock.close()
+        sys.exit(0)

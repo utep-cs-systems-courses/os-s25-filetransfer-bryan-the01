@@ -12,7 +12,11 @@ if os.fork() == 0:
 
 while True: 
     print("parent calling wait")
-    waitResults = os.waitid(os.P_ALL, 0, os.WNOHANG | os.WEXITED)
-    print(waitResults)
+    try:
+        waitResults = os.waitid(os.P_ALL, 0, os.WNOHANG | os.WEXITED)
+        print(waitResults)
+    except ChildProcessError:
+        print("No more child processes")
+        break
     time.sleep(1)
 
